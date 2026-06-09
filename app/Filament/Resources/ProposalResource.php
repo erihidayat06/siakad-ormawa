@@ -372,8 +372,11 @@ class ProposalResource extends Resource
             return $query->where('user_id', $user->id);
         }
 
+        // 2. Jika Kaprodi: Hanya melihat proposal milik mahasiswa yang department_id-nya SAMA
         if ($user->role === 'kaprodi') {
-            return $query->where('jurusan', $user->jurusan);
+            return $query->whereHas('user', function (Builder $subQuery) use ($user) {
+                $subQuery->where('department_id', $user->department_id);
+            });
         }
 
         // 2. Jika Pejabat (BEM, Kaprodi, Dekan, dll):
