@@ -372,6 +372,10 @@ class ProposalResource extends Resource
             return $query->where('user_id', $user->id);
         }
 
+        if ($user->role === 'kaprodi') {
+            return $query->where('jurusan', $user->jurusan);
+        }
+
         // 2. Jika Pejabat (BEM, Kaprodi, Dekan, dll):
         // LANGSUNG kembalikan $query tanpa filter apa-apa (LOSS)
         // Supaya mereka bisa memantau semua proposal dari awal masuk sampai selesai
