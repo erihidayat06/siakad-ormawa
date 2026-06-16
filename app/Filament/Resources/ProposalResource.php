@@ -141,7 +141,7 @@ class ProposalResource extends Resource
                     ->hidden(function ($record) {
                         return auth()->user()->role === 'mahasiswa' ||
                             $record->status === 'completed' ||
-                            $record->status === 'revision' || // Kunci di sini
+                            $record->status === 'revision' ||
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -161,8 +161,8 @@ class ProposalResource extends Resource
                             ->image()
                             ->imageEditor()
                             ->directory('proposals/payments')
-                            ->disk('public') // Pastikan disk ditentukan secara eksplisit
-                            ->visibility('public') // Ubah ke public agar mudah diakses infolist
+                            ->disk('public')
+                            ->visibility('public')
                             ->maxSize(2048)
                             ->getUploadedFileNameForStorageUsing(
                                 fn(TemporaryUploadedFile $file): string => (string) str(Str::random(20) . '.' . $file->getClientOriginalExtension()),
@@ -170,9 +170,7 @@ class ProposalResource extends Resource
                             ->visible(fn() => auth()->user()->role === 'tu')
                             ->required(fn() => auth()->user()->role === 'tu'),
                     ])
-                    // ... di dalam Action::make('approve')
                     ->action(function ($record, array $data) {
-                        // 1. Tentukan langkah selanjutnya
                         $nextStep = match ($record->current_step) {
                             'bem'     => 'kaprodi',
                             'kaprodi' => 'dekan',
@@ -183,22 +181,18 @@ class ProposalResource extends Resource
                             default   => 'selesai',
                         };
 
-                        // 2. Update status proposal
                         $record->update([
                             'current_step'  => $nextStep,
                             'current_file'  => $data['signed_file'] ?? $record->current_file,
-                            // TAMBAHKAN BARIS INI:
                             'payment_proof' => $data['payment_proof'] ?? $record->payment_proof,
                             'status'        => ($nextStep === 'selesai') ? 'completed' : 'pending',
                         ]);
 
-                        // 3. SIMPAN LOG (Penting: agar muncul di history)
                         $record->logs()->create([
-                            'user_id'     => auth()->id(),
-                            'action'      => 'approved',
-                            'notes'       => $data['notes'] ?? 'Disetujui oleh ' . strtoupper(auth()->user()->role),
-                            'file_result' => $data['signed_file'] ?? null,
-                            // TAMBAHKAN JUGA DI LOG (Opsional agar log mencatat bukti bayar):
+                            'user_id'       => auth()->id(),
+                            'action'        => 'approved',
+                            'notes'         => $data['notes'] ?? 'Disetujui oleh ' . strtoupper(auth()->user()->role),
+                            'file_result'   => $data['signed_file'] ?? null,
                             'payment_proof' => $data['payment_proof'] ?? null,
                         ]);
 
@@ -207,16 +201,16 @@ class ProposalResource extends Resource
                             ->success()
                             ->send();
                     }),
+
                 // TOMBOL REVISI (Hanya muncul untuk Pejabat)
                 Tables\Actions\Action::make('revisi')
                     ->label('Revisi')
                     ->color('danger')
                     ->icon('heroicon-o-x-circle')
                     ->hidden(function ($record) {
-                        // Logika yang sama dengan Approve
                         return auth()->user()->role === 'mahasiswa' ||
                             $record->status === 'completed' ||
-                            $record->status === 'revision' || // Kunci di sini
+                            $record->status === 'revision' ||
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -230,7 +224,6 @@ class ProposalResource extends Resource
                             'current_step' => 'bem',
                         ]);
 
-                        // SIMPAN LOG REVISI
                         $record->logs()->create([
                             'user_id' => auth()->id(),
                             'action' => 'revision',
@@ -243,52 +236,44 @@ class ProposalResource extends Resource
                             ->send();
                     }),
 
-
-
+                // TOMBOL EDIT (Diperbaiki Keamanan Kepemilikan & Tipe Data untuk Hosting)
                 Tables\Actions\EditAction::make()
                     ->visible(
                         fn($record) =>
-                        auth()->user()->role === 'mahasiswa' && (
-                            $record->status === 'revision' ||
-                            ($record->status === 'pending' && $record->current_step === 'bem')
-                        )
+                        auth()->user()->role === 'mahasiswa' &&
+                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN UTAMA: Mengunci pemilik data dengan aman
+                            (
+                                $record->status === 'revision' ||
+                                ($record->status === 'pending' && $record->current_step === 'bem')
+                            )
                     ),
-                // TOMBOL BATALKAN (Khusus Mahasiswa)
-                // TOMBOL KHUSUS MAHASISWA UNTUK MENGUBAH STATUS (TARIK DOKUMEN / BATALKAN)
+
+                // TOMBOL TARIK KEMBALI (Diperbaiki Keamanan Kepemilikan untuk Hosting)
                 Tables\Actions\Action::make('tarikKeDraft')
-                    ->label('Tarik Kembali') // Nama tombol yang muncul di aplikasi
+                    ->label('Tarik Kembali')
                     ->color('warning')
                     ->icon('heroicon-o-arrow-path')
-                    ->requiresConfirmation() // Memunculkan pop-up konfirmasi
+                    ->requiresConfirmation()
                     ->modalHeading('Tarik Pengajuan Proposal?')
                     ->modalDescription('Apakah Anda yakin ingin menarik kembali proposal ini? Status akan berubah menjadi revisi agar Anda bisa mengubah datanya kembali.')
-
-                    // ATURAN VISIBILITY: Tombol ini HANYA MUNCUL jika:
                     ->visible(function ($record) {
-                        // 1. Yang login adalah mahasiswa
-                        // 2. DAN statusnya masih pending (belum disetujui sampai akhir)
-                        // 3. DAN posisi dokumen masih di meja awal (BEM), belum diproses lebih jauh
                         return auth()->user()->role === 'mahasiswa' &&
+                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN: Menjamin hanya pembuat berkas yang bisa melihat/menarik
                             $record->status === 'pending' &&
                             $record->current_step === 'bem';
                     })
-
-                    // PROSES PERUBAHAN STATUSNYA DI SINI:
                     ->action(function ($record) {
-                        // Ubah status proposal di database menjadi 'revision'
                         $record->update([
                             'status' => 'revision',
-                            'current_step' => 'bem', // Tetap di BEM
+                            'current_step' => 'bem',
                         ]);
 
-                        // Catat aksi mahasiswa ini ke dalam LOG history
                         $record->logs()->create([
                             'user_id' => auth()->id(),
                             'action' => 'revision',
                             'notes' => 'Proposal ditarik kembali secara mandiri oleh mahasiswa untuk diperbaiki.',
                         ]);
 
-                        // Kirim notifikasi sukses di pojok kanan atas screen
                         \Filament\Notifications\Notification::make()
                             ->title('Status Berhasil Diubah')
                             ->body('Proposal sekarang berstatus REVISI dan gembok edit telah terbuka.')
