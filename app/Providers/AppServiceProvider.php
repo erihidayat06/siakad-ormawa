@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Models\Proposal;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -19,10 +21,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        Gate::policy(Proposal::class, null);
     }
 
-    protected $policies = [
-        \App\Models\Proposal::class => \App\Policies\ProposalPolicy::class,
-    ];
+    // protected $policies = [
+    //     \App\Models\Proposal::class => \App\Policies\ProposalPolicy::class,
+    // ];
 }
