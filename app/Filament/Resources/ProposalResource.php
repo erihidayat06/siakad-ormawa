@@ -12,8 +12,6 @@ use Filament\Tables\Table;
 use Filament\Infolists;
 use Filament\Infolists\Infolist;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Hash;
-use Filament\Support\Enums\FontWeight;
 use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
@@ -27,34 +25,16 @@ class ProposalResource extends Resource
 
     public static function canViewAny(): bool
     {
-        // Admin TIDAK BOLEH melihat menu/halaman proposal
-        // Mahasiswa dan Role Pejabat BOLEH melihat
         return auth()->user()->role !== 'admin';
     }
 
     public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
     {
-        $user = auth()->user();
-
-        if (! $user) {
-            return false;
-        }
-
-        if ($user->role === 'mahasiswa') {
-            return $user->id === $record->user_id && (
-                $record->status === 'revision' ||
-                ($record->status === 'pending' && $record->current_step === 'bem')
-            );
-        }
-
-        return false;
+        return true;
     }
 
-
-    // Tambahkan fungsi ini di dalam class ProposalResource
     public static function canCreate(): bool
     {
-        // Hanya izinkan jika role user adalah mahasiswa
         return auth()->user()->role === 'mahasiswa';
     }
 
@@ -74,6 +54,8 @@ class ProposalResource extends Resource
                         Forms\Components\FileUpload::make('original_file')
                             ->label('Dokumen Proposal (PDF)')
                             ->directory('proposals/originals')
+                            ->disk('public') // FIX: Tambahkan disk public
+                            ->visibility('public')
                             ->acceptedFileTypes(['application/pdf'])
                             ->required()
                             ->preserveFilenames()
@@ -83,7 +65,6 @@ class ProposalResource extends Resource
                             )
                             ->downloadable(),
 
-                        // Hidden fields untuk logika sistem
                         Forms\Components\Hidden::make('user_id')
                             ->default(auth()->id()),
 
@@ -100,7 +81,6 @@ class ProposalResource extends Resource
     {
         return $table
             ->columns([
-
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Pengaju')
                     ->searchable()
@@ -110,39 +90,45 @@ class ProposalResource extends Resource
                     ->label('Judul')
                     ->limit(30)
                     ->searchable(),
-                Tables\Columns\BadgeColumn::make('status')
+
+                Tables\Columns\TextColumn::make('status') // FIX: Gunakan TextColumn biasa dengan ->badge() sesuai standar v3
                     ->label('Status')
+                    ->badge()
                     ->colors([
                         'warning' => 'pending',
                         'danger' => 'revision',
                         'success' => 'completed',
                     ]),
+
                 Tables\Columns\TextColumn::make('current_step')
                     ->label('Posisi Dokumen')
                     ->formatStateUsing(fn(string $state): string => strtoupper($state))
                     ->badge()
                     ->color('gray'),
+
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Tanggal Masuk')
                     ->dateTime('d M Y')
                     ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
-            ->filters([
-                // Tambahkan filter jika diperlukan nanti
-            ])
+            ->filters([])
             ->actions([
-                Tables\Actions\ViewAction::make(),
+                Tables\Actions\Action::make('viewCustom')
+                    ->label('View')
+                    ->color('gray')
+                    ->icon('heroicon-o-eye')
+                    ->url(fn($record): string => static::getUrl('view', ['record' => $record])),
 
-                // TOMBOL APPROVE (Hanya muncul untuk Pejabat)
+                // TOMBOL APPROVE
                 Tables\Actions\Action::make('approve')
                     ->label('Approve')
                     ->color('success')
                     ->icon('heroicon-o-check-circle')
                     ->hidden(function ($record) {
-                        return auth()->user()->role === 'mahasiswa' ||
-                            $record->status === 'completed' ||
-                            $record->status === 'revision' ||
+                        // FIX: Amankan tombol. Hanya muncul jika status murni 'pending' dan role adalah pemegang dokumen saat ini
+                        return $record->status !== 'pending' ||
+                            auth()->user()->role === 'mahasiswa' ||
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -151,12 +137,14 @@ class ProposalResource extends Resource
                         Forms\Components\FileUpload::make('signed_file')
                             ->label('Upload File TTD (Khusus Kaprodi)')
                             ->directory('proposals/signed')
+                            ->disk('public') // FIX: Tambahkan disk public
+                            ->visibility('public')
                             ->acceptedFileTypes(['application/pdf'])
                             ->getUploadedFileNameForStorageUsing(
                                 fn(TemporaryUploadedFile $file): string => (string) str(Str::random(20) . '.' . $file->getClientOriginalExtension()),
                             )
                             ->visible(fn() => auth()->user()->role === 'kaprodi'),
-                        // KHUSUS PAYMENT (Role tu)
+
                         Forms\Components\FileUpload::make('payment_proof')
                             ->label('Unggah Bukti Transfer/Pembayaran')
                             ->image()
@@ -192,7 +180,7 @@ class ProposalResource extends Resource
                         $record->logs()->create([
                             'user_id'       => auth()->id(),
                             'action'        => 'approved',
-                            'notes'         => $data['notes'] ?? 'Disetujui oleh ' . strtoupper(auth()->user()->role),
+                            'notes'         => $data['notes'] ?: 'Disetujui oleh ' . strtoupper(auth()->user()->role),
                             'file_result'   => $data['signed_file'] ?? null,
                             'payment_proof' => $data['payment_proof'] ?? null,
                         ]);
@@ -203,15 +191,15 @@ class ProposalResource extends Resource
                             ->send();
                     }),
 
-                // TOMBOL REVISI (Hanya muncul untuk Pejabat)
+                // TOMBOL REVISI
                 Tables\Actions\Action::make('revisi')
                     ->label('Revisi')
                     ->color('danger')
                     ->icon('heroicon-o-x-circle')
                     ->hidden(function ($record) {
-                        return auth()->user()->role === 'mahasiswa' ||
-                            $record->status === 'completed' ||
-                            $record->status === 'revision' ||
+                        // FIX: Hanya boleh melakukan revisi jika status proposal sedang 'pending'
+                        return $record->status !== 'pending' ||
+                            auth()->user()->role === 'mahasiswa' ||
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -237,19 +225,25 @@ class ProposalResource extends Resource
                             ->send();
                     }),
 
-                // TOMBOL EDIT (Diperbaiki Keamanan Kepemilikan & Tipe Data untuk Hosting)
-                Tables\Actions\EditAction::make()
-                    ->visible(
-                        fn($record) =>
-                        auth()->user()->role === 'mahasiswa' &&
-                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN UTAMA: Mengunci pemilik data dengan aman
-                            (
-                                $record->status === 'revision' ||
-                                ($record->status === 'pending' && $record->current_step === 'bem')
-                            )
-                    ),
+                // TOMBOL EDIT CUSTOM
+                Tables\Actions\Action::make('editCustom')
+                    ->label('Edit')
+                    ->color('primary')
+                    ->icon('heroicon-o-pencil-square')
+                    ->url(fn($record): string => static::getUrl('edit', ['record' => $record]))
+                    ->visible(function ($record) {
+                        $roleUser = strtolower(auth()->user()->role);
+                        $statusProposal = strtolower($record->status);
+                        $stepProposal = strtolower($record->current_step);
+                        $isOwner = (int) $record->user_id === (int) auth()->id();
 
-                // TOMBOL TARIK KEMBALI (Diperbaiki Keamanan Kepemilikan untuk Hosting)
+                        return $roleUser === 'mahasiswa' && $isOwner && (
+                            $statusProposal === 'revision' ||
+                            ($statusProposal === 'pending' && $stepProposal === 'bem')
+                        );
+                    }),
+
+                // TOMBOL TARIK KEMBALI
                 Tables\Actions\Action::make('tarikKeDraft')
                     ->label('Tarik Kembali')
                     ->color('warning')
@@ -258,10 +252,14 @@ class ProposalResource extends Resource
                     ->modalHeading('Tarik Pengajuan Proposal?')
                     ->modalDescription('Apakah Anda yakin ingin menarik kembali proposal ini? Status akan berubah menjadi revisi agar Anda bisa mengubah datanya kembali.')
                     ->visible(function ($record) {
-                        return auth()->user()->role === 'mahasiswa' &&
-                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN: Menjamin hanya pembuat berkas yang bisa melihat/menarik
-                            $record->status === 'pending' &&
-                            $record->current_step === 'bem';
+                        $roleUser = strtolower(auth()->user()->role);
+                        $statusProposal = strtolower($record->status);
+                        $stepProposal = strtolower($record->current_step);
+                        $isOwner = (int) $record->user_id === (int) auth()->id();
+
+                        return $roleUser === 'mahasiswa' && $isOwner &&
+                            $statusProposal === 'pending' &&
+                            $stepProposal === 'bem';
                     })
                     ->action(function ($record) {
                         $record->update([
@@ -293,7 +291,6 @@ class ProposalResource extends Resource
     {
         return $infolist
             ->schema([
-                // SECTION 1: Informasi Utama
                 Infolists\Components\Section::make('Informasi Proposal')
                     ->icon('heroicon-o-information-circle')
                     ->schema([
@@ -316,7 +313,6 @@ class ProposalResource extends Resource
                             ]),
                     ]),
 
-                // SECTION 2: Bukti Pembayaran (Preview Besar)
                 Infolists\Components\Section::make('Bukti Pembayaran')
                     ->description('Bukti transfer atau nota pembayaran yang diunggah oleh Bendahara.')
                     ->icon('heroicon-o-credit-card')
@@ -329,7 +325,6 @@ class ProposalResource extends Resource
                             ->columnSpanFull(),
                     ]),
 
-                // SECTION 3: Preview PDF
                 Infolists\Components\Section::make('Preview Dokumen')
                     ->icon('heroicon-o-document-text')
                     ->collapsible()
@@ -347,7 +342,6 @@ class ProposalResource extends Resource
                             ]),
                     ]),
 
-                // SECTION 4: Riwayat (History)
                 Infolists\Components\Section::make('Riwayat Perjalanan (History)')
                     ->description('Log aktivitas dan perubahan status proposal.')
                     ->icon('heroicon-o-clock')
@@ -356,7 +350,7 @@ class ProposalResource extends Resource
                         Infolists\Components\RepeatableEntry::make('logs')
                             ->label('')
                             ->schema([
-                                Infolists\Components\Grid::make(6) // Ditambah kolomnya agar lebih lega
+                                Infolists\Components\Grid::make(6)
                                     ->schema([
                                         Infolists\Components\TextEntry::make('created_at')
                                             ->label('Waktu')
@@ -394,9 +388,8 @@ class ProposalResource extends Resource
 
                                         Infolists\Components\TextEntry::make('notes')
                                             ->label('Catatan')
-                                            ->columnSpan(6) // Berikan span penuh agar catatan tidak sempit
+                                            ->columnSpan(6)
                                             ->color('gray')
-
                                             ->placeholder('Tidak ada catatan tambahan.'),
                                     ]),
                             ])
@@ -405,6 +398,7 @@ class ProposalResource extends Resource
                     ]),
             ]);
     }
+
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
