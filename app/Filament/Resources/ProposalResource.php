@@ -32,6 +32,24 @@ class ProposalResource extends Resource
         return auth()->user()->role !== 'admin';
     }
 
+    public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
+    {
+        $user = auth()->user();
+
+        if (! $user) {
+            return false;
+        }
+
+        if ($user->role === 'mahasiswa') {
+            return $user->id === $record->user_id && (
+                $record->status === 'revision' ||
+                ($record->status === 'pending' && $record->current_step === 'bem')
+            );
+        }
+
+        return false;
+    }
+
 
     // Tambahkan fungsi ini di dalam class ProposalResource
     public static function canCreate(): bool
@@ -121,12 +139,9 @@ class ProposalResource extends Resource
                     ->color('success')
                     ->icon('heroicon-o-check-circle')
                     ->hidden(function ($record) {
-                        // Sembunyikan jika:
-                        // 1. User adalah mahasiswa
-                        // 2. ATAU status sudah selesai
-                        // 3. ATAU role user TIDAK SAMA dengan posisi dokumen saat ini
                         return auth()->user()->role === 'mahasiswa' ||
                             $record->status === 'completed' ||
+                            $record->status === 'revision' || // Kunci di sini
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -201,6 +216,7 @@ class ProposalResource extends Resource
                         // Logika yang sama dengan Approve
                         return auth()->user()->role === 'mahasiswa' ||
                             $record->status === 'completed' ||
+                            $record->status === 'revision' || // Kunci di sini
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -211,8 +227,6 @@ class ProposalResource extends Resource
                     ->action(function ($record, array $data) {
                         $record->update([
                             'status' => 'revision',
-                            // Opsi: kembalikan ke BEM atau tetap di meja yang sama tapi status 'revisi'
-                            // Di sini kita contohkan balik ke 'bem' agar mahasiswa lapor lewat BEM lagi
                             'current_step' => 'bem',
                         ]);
 
@@ -229,15 +243,58 @@ class ProposalResource extends Resource
                             ->send();
                     }),
 
+
+
                 Tables\Actions\EditAction::make()
-                    // Tombol edit hanya muncul jika:
-                    // 1. User adalah mahasiswa
-                    // 2. DAN status proposal adalah 'revision'
                     ->visible(
                         fn($record) =>
-                        auth()->user()->role === 'mahasiswa' &&
-                            $record->status === 'revision'
+                        auth()->user()->role === 'mahasiswa' && (
+                            $record->status === 'revision' ||
+                            ($record->status === 'pending' && $record->current_step === 'bem')
+                        )
                     ),
+                // TOMBOL BATALKAN (Khusus Mahasiswa)
+                // TOMBOL KHUSUS MAHASISWA UNTUK MENGUBAH STATUS (TARIK DOKUMEN / BATALKAN)
+                Tables\Actions\Action::make('tarikKeDraft')
+                    ->label('Tarik Kembali') // Nama tombol yang muncul di aplikasi
+                    ->color('warning')
+                    ->icon('heroicon-o-arrow-path')
+                    ->requiresConfirmation() // Memunculkan pop-up konfirmasi
+                    ->modalHeading('Tarik Pengajuan Proposal?')
+                    ->modalDescription('Apakah Anda yakin ingin menarik kembali proposal ini? Status akan berubah menjadi revisi agar Anda bisa mengubah datanya kembali.')
+
+                    // ATURAN VISIBILITY: Tombol ini HANYA MUNCUL jika:
+                    ->visible(function ($record) {
+                        // 1. Yang login adalah mahasiswa
+                        // 2. DAN statusnya masih pending (belum disetujui sampai akhir)
+                        // 3. DAN posisi dokumen masih di meja awal (BEM), belum diproses lebih jauh
+                        return auth()->user()->role === 'mahasiswa' &&
+                            $record->status === 'pending' &&
+                            $record->current_step === 'bem';
+                    })
+
+                    // PROSES PERUBAHAN STATUSNYA DI SINI:
+                    ->action(function ($record) {
+                        // Ubah status proposal di database menjadi 'revision'
+                        $record->update([
+                            'status' => 'revision',
+                            'current_step' => 'bem', // Tetap di BEM
+                        ]);
+
+                        // Catat aksi mahasiswa ini ke dalam LOG history
+                        $record->logs()->create([
+                            'user_id' => auth()->id(),
+                            'action' => 'revision',
+                            'notes' => 'Proposal ditarik kembali secara mandiri oleh mahasiswa untuk diperbaiki.',
+                        ]);
+
+                        // Kirim notifikasi sukses di pojok kanan atas screen
+                        \Filament\Notifications\Notification::make()
+                            ->title('Status Berhasil Diubah')
+                            ->body('Proposal sekarang berstatus REVISI dan gembok edit telah terbuka.')
+                            ->success()
+                            ->send();
+                    }),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
@@ -367,21 +424,20 @@ class ProposalResource extends Resource
         $query = parent::getEloquentQuery();
         $user = auth()->user();
 
-        // 1. Jika Mahasiswa: Hanya lihat miliknya sendiri (Ini sudah benar, pertahankan)
+        if (! $user) {
+            return $query;
+        }
+
         if ($user->role === 'mahasiswa') {
             return $query->where('user_id', $user->id);
         }
 
-        // 2. Jika Kaprodi: Hanya melihat proposal milik mahasiswa yang department_id-nya SAMA
         if ($user->role === 'kaprodi') {
             return $query->whereHas('user', function (Builder $subQuery) use ($user) {
                 $subQuery->where('department_id', $user->department_id);
             });
         }
 
-        // 2. Jika Pejabat (BEM, Kaprodi, Dekan, dll):
-        // LANGSUNG kembalikan $query tanpa filter apa-apa (LOSS)
-        // Supaya mereka bisa memantau semua proposal dari awal masuk sampai selesai
         return $query;
     }
 

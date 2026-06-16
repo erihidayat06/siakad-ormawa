@@ -342,15 +342,32 @@ class LpjResource extends Resource
     {
         $query = parent::getEloquentQuery();
 
-        // Jika login sebagai mahasiswa, hanya bisa lihat LPJ miliknya sendiri
-        if (auth()->check() && auth()->user()->role === 'mahasiswa') {
-            return $query->where('user_id', auth()->id());
+        // 1. Definisikan variabel $user di paling atas agar bisa dipakai di bawah
+        $user = auth()->user();
+
+        // Jika user tidak login, langsung kembalikan query kosong (safety guard)
+        if (!$user) {
+            return $query->whereRaw('1 = 0');
         }
 
-        // Pejabat (Kaprodi, WD3, WD2) bisa melihat semua LPJ yang masuk ke fakultas
+        // 2. Jika login sebagai mahasiswa: hanya bisa lihat LPJ dari proposal miliknya sendiri
+        if ($user->role === 'mahasiswa') {
+            return $query->whereHas('proposal', function (\Illuminate\Database\Eloquent\Builder $subQuery) use ($user) {
+                $subQuery->where('user_id', $user->id);
+            });
+        }
+
+        // 3. Jika Kaprodi: Lihat LPJ yang proposalnya diajukan oleh mahasiswa dengan department_id yang sama
+        if ($user->role === 'kaprodi') {
+            // Menyeberang dari LPJ -> Proposal -> User (Mahasiswa)
+            return $query->whereHas('proposal.user', function (\Illuminate\Database\Eloquent\Builder $subQuery) use ($user) {
+                $subQuery->where('department_id', $user->department_id);
+            });
+        }
+
+        // 4. Pejabat fakultas lainnya (BEM, Dekan, WD3, WD2, TU) bisa melihat semua LPJ yang masuk
         return $query;
     }
-
     public static function getPages(): array
     {
         return [

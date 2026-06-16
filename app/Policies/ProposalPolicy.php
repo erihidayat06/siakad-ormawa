@@ -47,10 +47,12 @@ class ProposalPolicy
      */
     public function update(User $user, Proposal $proposal): bool
     {
-        // Hanya mahasiswa pemilik proposal yang bisa edit, dan hanya saat statusnya 'revision'
+        // Logika disamakan dengan canEdit di Resource
         return $user->role === 'mahasiswa' &&
-            $user->id === $proposal->user_id &&
-            $proposal->status === 'revision';
+            $user->id === $proposal->user_id && (
+                $proposal->status === 'revision' ||
+                ($proposal->status === 'pending' && $proposal->current_step === 'bem')
+            );
     }
 
     /**
@@ -58,7 +60,7 @@ class ProposalPolicy
      */
     public function delete(User $user, Proposal $proposal): bool
     {
-        // Sesuaikan dengan kebutuhan, di sini hanya role admin yang diizinkan
+
         return $user->role === 'admin';
     }
 }
