@@ -237,16 +237,8 @@ class ProposalResource extends Resource
                     }),
 
                 // TOMBOL EDIT (Diperbaiki Keamanan Kepemilikan & Tipe Data untuk Hosting)
-                Tables\Actions\EditAction::make()
-                    ->visible(
-                        fn($record) =>
-                        auth()->user()->role === 'mahasiswa' &&
+                Tables\Actions\EditAction::make(),
 
-                            (
-                                $record->status === 'revision' ||
-                                ($record->status === 'pending' && $record->current_step === 'bem')
-                            )
-                    ),
 
                 // TOMBOL TARIK KEMBALI (Diperbaiki Keamanan Kepemilikan untuk Hosting)
                 Tables\Actions\Action::make('tarikKeDraft')
