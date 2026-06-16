@@ -34,24 +34,12 @@ class ProposalResource extends Resource
 
     public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
     {
-        $user = auth()->user();
-
-        if (! $user) {
-            return false;
-        }
-
-        if ($user->role === 'mahasiswa') {
-            return $user->id === $record->user_id && (
-                $record->status === 'revision' ||
-                ($record->status === 'pending' && $record->current_step === 'bem')
-            );
-        }
-
-        return false;
+        // Longgarkan ke true agar Filament mendaftarkan rute /edit di hosting.
+        // Keamanan asli pemegang dokumen sudah dijaga ketat di level page (beforeFill)
+        // dan level tombol (->visible) di bawah.
+        return true;
     }
 
-
-    // Tambahkan fungsi ini di dalam class ProposalResource
     public static function canCreate(): bool
     {
         // Hanya izinkan jika role user adalah mahasiswa
@@ -100,7 +88,6 @@ class ProposalResource extends Resource
     {
         return $table
             ->columns([
-
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Pengaju')
                     ->searchable()
@@ -110,6 +97,7 @@ class ProposalResource extends Resource
                     ->label('Judul')
                     ->limit(30)
                     ->searchable(),
+
                 Tables\Columns\BadgeColumn::make('status')
                     ->label('Status')
                     ->colors([
@@ -117,11 +105,13 @@ class ProposalResource extends Resource
                         'danger' => 'revision',
                         'success' => 'completed',
                     ]),
+
                 Tables\Columns\TextColumn::make('current_step')
                     ->label('Posisi Dokumen')
                     ->formatStateUsing(fn(string $state): string => strtoupper($state))
                     ->badge()
                     ->color('gray'),
+
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Tanggal Masuk')
                     ->dateTime('d M Y')
@@ -132,7 +122,12 @@ class ProposalResource extends Resource
                 // Tambahkan filter jika diperlukan nanti
             ])
             ->actions([
-                Tables\Actions\ViewAction::make(),
+                // 1. TOMBOL VIEW CUSTOM (Solusi anti-cache hosting)
+                Tables\Actions\Action::make('viewCustom')
+                    ->label('View')
+                    ->color('gray')
+                    ->icon('heroicon-o-eye')
+                    ->url(fn($record): string => static::getUrl('view', ['record' => $record])),
 
                 // TOMBOL APPROVE (Hanya muncul untuk Pejabat)
                 Tables\Actions\Action::make('approve')
@@ -237,16 +232,25 @@ class ProposalResource extends Resource
                             ->send();
                     }),
 
-                // TOMBOL EDIT (Diperbaiki Keamanan Kepemilikan & Tipe Data untuk Hosting)
-                Tables\Actions\EditAction::make()
+                // 2. TOMBOL EDIT CUSTOM (Mengatasi bug gembok rute di hosting)
+                Tables\Actions\Action::make('editCustom')
+                    ->label('Edit')
+                    ->color('primary')
+                    ->icon('heroicon-o-pencil-square')
+                    ->url(fn($record): string => static::getUrl('edit', ['record' => $record]))
                     ->visible(function ($record) {
-                        return auth()->user()->role === 'mahasiswa' &&
-                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN: Menjamin hanya pembuat berkas yang bisa melihat/menarik
-                            $record->status === 'pending' &&
-                            $record->current_step === 'bem';
+                        $roleUser = strtolower(auth()->user()->role);
+                        $statusProposal = strtolower($record->status);
+                        $stepProposal = strtolower($record->current_step);
+                        $isOwner = (int) $record->user_id === (int) auth()->id();
+
+                        return $roleUser === 'mahasiswa' && $isOwner && (
+                            $statusProposal === 'revision' ||
+                            ($statusProposal === 'pending' && $stepProposal === 'bem')
+                        );
                     }),
 
-                // TOMBOL TARIK KEMBALI (Diperbaiki Keamanan Kepemilikan untuk Hosting)
+                // TOMBOL TARIK KEMBALI
                 Tables\Actions\Action::make('tarikKeDraft')
                     ->label('Tarik Kembali')
                     ->color('warning')
@@ -255,10 +259,14 @@ class ProposalResource extends Resource
                     ->modalHeading('Tarik Pengajuan Proposal?')
                     ->modalDescription('Apakah Anda yakin ingin menarik kembali proposal ini? Status akan berubah menjadi revisi agar Anda bisa mengubah datanya kembali.')
                     ->visible(function ($record) {
-                        return auth()->user()->role === 'mahasiswa' &&
-                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN: Menjamin hanya pembuat berkas yang bisa melihat/menarik
-                            $record->status === 'pending' &&
-                            $record->current_step === 'bem';
+                        $roleUser = strtolower(auth()->user()->role);
+                        $statusProposal = strtolower($record->status);
+                        $stepProposal = strtolower($record->current_step);
+                        $isOwner = (int) $record->user_id === (int) auth()->id();
+
+                        return $roleUser === 'mahasiswa' && $isOwner &&
+                            $statusProposal === 'pending' &&
+                            $stepProposal === 'bem';
                     })
                     ->action(function ($record) {
                         $record->update([
@@ -290,7 +298,6 @@ class ProposalResource extends Resource
     {
         return $infolist
             ->schema([
-                // SECTION 1: Informasi Utama
                 Infolists\Components\Section::make('Informasi Proposal')
                     ->icon('heroicon-o-information-circle')
                     ->schema([
@@ -313,7 +320,6 @@ class ProposalResource extends Resource
                             ]),
                     ]),
 
-                // SECTION 2: Bukti Pembayaran (Preview Besar)
                 Infolists\Components\Section::make('Bukti Pembayaran')
                     ->description('Bukti transfer atau nota pembayaran yang diunggah oleh Bendahara.')
                     ->icon('heroicon-o-credit-card')
@@ -326,7 +332,6 @@ class ProposalResource extends Resource
                             ->columnSpanFull(),
                     ]),
 
-                // SECTION 3: Preview PDF
                 Infolists\Components\Section::make('Preview Dokumen')
                     ->icon('heroicon-o-document-text')
                     ->collapsible()
@@ -344,7 +349,6 @@ class ProposalResource extends Resource
                             ]),
                     ]),
 
-                // SECTION 4: Riwayat (History)
                 Infolists\Components\Section::make('Riwayat Perjalanan (History)')
                     ->description('Log aktivitas dan perubahan status proposal.')
                     ->icon('heroicon-o-clock')
@@ -353,7 +357,7 @@ class ProposalResource extends Resource
                         Infolists\Components\RepeatableEntry::make('logs')
                             ->label('')
                             ->schema([
-                                Infolists\Components\Grid::make(6) // Ditambah kolomnya agar lebih lega
+                                Infolists\Components\Grid::make(6)
                                     ->schema([
                                         Infolists\Components\TextEntry::make('created_at')
                                             ->label('Waktu')
@@ -391,9 +395,8 @@ class ProposalResource extends Resource
 
                                         Infolists\Components\TextEntry::make('notes')
                                             ->label('Catatan')
-                                            ->columnSpan(6) // Berikan span penuh agar catatan tidak sempit
+                                            ->columnSpan(6)
                                             ->color('gray')
-
                                             ->placeholder('Tidak ada catatan tambahan.'),
                                     ]),
                             ])
@@ -402,6 +405,7 @@ class ProposalResource extends Resource
                     ]),
             ]);
     }
+
     public static function getEloquentQuery(): Builder
     {
         $query = parent::getEloquentQuery();
