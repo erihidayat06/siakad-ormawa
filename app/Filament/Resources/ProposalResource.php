@@ -25,12 +25,12 @@ class ProposalResource extends Resource
 
     public static function canViewAny(): bool
     {
-        return auth()->user()->role !== 'admin';
+        return auth()->check();
     }
 
     public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
     {
-        return true;
+        return auth()->user()->role === 'mahasiswa';
     }
 
     public static function canCreate(): bool
