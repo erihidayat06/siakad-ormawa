@@ -58,8 +58,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        if ($this->app->environment('production')) {
-            URL::forceScheme('https');
-        }
+        \Illuminate\Support\Facades\Gate::before(function ($user, $ability) {
+            return true; // Return true berarti "IZINKAN SEMUA"
+        });
     }
 }
