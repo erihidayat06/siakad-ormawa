@@ -12,8 +12,6 @@ use Filament\Tables\Table;
 use Filament\Infolists;
 use Filament\Infolists\Infolist;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Hash;
-use Filament\Support\Enums\FontWeight;
 use Illuminate\Support\Str;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
@@ -27,22 +25,16 @@ class ProposalResource extends Resource
 
     public static function canViewAny(): bool
     {
-        // Admin TIDAK BOLEH melihat menu/halaman proposal
-        // Mahasiswa dan Role Pejabat BOLEH melihat
         return auth()->user()->role !== 'admin';
     }
 
     public static function canEdit(\Illuminate\Database\Eloquent\Model $record): bool
     {
-        // Longgarkan ke true agar Filament mendaftarkan rute /edit di hosting.
-        // Keamanan asli pemegang dokumen sudah dijaga ketat di level page (beforeFill)
-        // dan level tombol (->visible) di bawah.
         return true;
     }
 
     public static function canCreate(): bool
     {
-        // Hanya izinkan jika role user adalah mahasiswa
         return auth()->user()->role === 'mahasiswa';
     }
 
@@ -62,6 +54,8 @@ class ProposalResource extends Resource
                         Forms\Components\FileUpload::make('original_file')
                             ->label('Dokumen Proposal (PDF)')
                             ->directory('proposals/originals')
+                            ->disk('public') // FIX: Tambahkan disk public
+                            ->visibility('public')
                             ->acceptedFileTypes(['application/pdf'])
                             ->required()
                             ->preserveFilenames()
@@ -71,7 +65,6 @@ class ProposalResource extends Resource
                             )
                             ->downloadable(),
 
-                        // Hidden fields untuk logika sistem
                         Forms\Components\Hidden::make('user_id')
                             ->default(auth()->id()),
 
@@ -98,8 +91,9 @@ class ProposalResource extends Resource
                     ->limit(30)
                     ->searchable(),
 
-                Tables\Columns\BadgeColumn::make('status')
+                Tables\Columns\TextColumn::make('status') // FIX: Gunakan TextColumn biasa dengan ->badge() sesuai standar v3
                     ->label('Status')
+                    ->badge()
                     ->colors([
                         'warning' => 'pending',
                         'danger' => 'revision',
@@ -118,26 +112,23 @@ class ProposalResource extends Resource
                     ->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
-            ->filters([
-                // Tambahkan filter jika diperlukan nanti
-            ])
+            ->filters([])
             ->actions([
-                // 1. TOMBOL VIEW CUSTOM (Solusi anti-cache hosting)
                 Tables\Actions\Action::make('viewCustom')
                     ->label('View')
                     ->color('gray')
                     ->icon('heroicon-o-eye')
                     ->url(fn($record): string => static::getUrl('view', ['record' => $record])),
 
-                // TOMBOL APPROVE (Hanya muncul untuk Pejabat)
+                // TOMBOL APPROVE
                 Tables\Actions\Action::make('approve')
                     ->label('Approve')
                     ->color('success')
                     ->icon('heroicon-o-check-circle')
                     ->hidden(function ($record) {
-                        return auth()->user()->role === 'mahasiswa' ||
-                            $record->status === 'completed' ||
-                            $record->status === 'revision' ||
+                        // FIX: Amankan tombol. Hanya muncul jika status murni 'pending' dan role adalah pemegang dokumen saat ini
+                        return $record->status !== 'pending' ||
+                            auth()->user()->role === 'mahasiswa' ||
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -146,12 +137,14 @@ class ProposalResource extends Resource
                         Forms\Components\FileUpload::make('signed_file')
                             ->label('Upload File TTD (Khusus Kaprodi)')
                             ->directory('proposals/signed')
+                            ->disk('public') // FIX: Tambahkan disk public
+                            ->visibility('public')
                             ->acceptedFileTypes(['application/pdf'])
                             ->getUploadedFileNameForStorageUsing(
                                 fn(TemporaryUploadedFile $file): string => (string) str(Str::random(20) . '.' . $file->getClientOriginalExtension()),
                             )
                             ->visible(fn() => auth()->user()->role === 'kaprodi'),
-                        // KHUSUS PAYMENT (Role tu)
+
                         Forms\Components\FileUpload::make('payment_proof')
                             ->label('Unggah Bukti Transfer/Pembayaran')
                             ->image()
@@ -187,7 +180,7 @@ class ProposalResource extends Resource
                         $record->logs()->create([
                             'user_id'       => auth()->id(),
                             'action'        => 'approved',
-                            'notes'         => $data['notes'] ?? 'Disetujui oleh ' . strtoupper(auth()->user()->role),
+                            'notes'         => $data['notes'] ?: 'Disetujui oleh ' . strtoupper(auth()->user()->role),
                             'file_result'   => $data['signed_file'] ?? null,
                             'payment_proof' => $data['payment_proof'] ?? null,
                         ]);
@@ -198,15 +191,15 @@ class ProposalResource extends Resource
                             ->send();
                     }),
 
-                // TOMBOL REVISI (Hanya muncul untuk Pejabat)
+                // TOMBOL REVISI
                 Tables\Actions\Action::make('revisi')
                     ->label('Revisi')
                     ->color('danger')
                     ->icon('heroicon-o-x-circle')
                     ->hidden(function ($record) {
-                        return auth()->user()->role === 'mahasiswa' ||
-                            $record->status === 'completed' ||
-                            $record->status === 'revision' ||
+                        // FIX: Hanya boleh melakukan revisi jika status proposal sedang 'pending'
+                        return $record->status !== 'pending' ||
+                            auth()->user()->role === 'mahasiswa' ||
                             auth()->user()->role !== $record->current_step;
                     })
                     ->form([
@@ -232,7 +225,7 @@ class ProposalResource extends Resource
                             ->send();
                     }),
 
-                // 2. TOMBOL EDIT CUSTOM (Mengatasi bug gembok rute di hosting)
+                // TOMBOL EDIT CUSTOM
                 Tables\Actions\Action::make('editCustom')
                     ->label('Edit')
                     ->color('primary')
