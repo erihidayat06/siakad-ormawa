@@ -100,19 +100,7 @@ class ProposalResource extends Resource
     {
         return $table
             ->columns([
-                // ==================== KOLOM DEBUG (HAPUS JIKA SUDAH KETEMU MASALAHNYA) ====================
-                Tables\Columns\TextColumn::make('debug_role')
-                    ->label('Role di Auth')
-                    ->getStateUsing(fn() => auth()->user()->role),
 
-                Tables\Columns\TextColumn::make('debug_match_id')
-                    ->label('ID Match?')
-                    ->getStateUsing(fn($record) => 'User: ' . auth()->id() . ' | Proposal: ' . $record->user_id),
-
-                Tables\Columns\TextColumn::make('debug_kondisi')
-                    ->label('Status & Step')
-                    ->getStateUsing(fn($record) => 'Status: ' . $record->status . ' | Step: ' . $record->current_step),
-                // =========================================================================================
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Pengaju')
                     ->searchable()
