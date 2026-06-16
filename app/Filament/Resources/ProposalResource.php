@@ -241,7 +241,7 @@ class ProposalResource extends Resource
                     ->visible(
                         fn($record) =>
                         auth()->user()->role === 'mahasiswa' &&
-                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN UTAMA: Mengunci pemilik data dengan aman
+
                             (
                                 $record->status === 'revision' ||
                                 ($record->status === 'pending' && $record->current_step === 'bem')
@@ -258,7 +258,7 @@ class ProposalResource extends Resource
                     ->modalDescription('Apakah Anda yakin ingin menarik kembali proposal ini? Status akan berubah menjadi revisi agar Anda bisa mengubah datanya kembali.')
                     ->visible(function ($record) {
                         return auth()->user()->role === 'mahasiswa' &&
-                            (int) $record->user_id === (int) auth()->id() && // <-- PERBAIKAN: Menjamin hanya pembuat berkas yang bisa melihat/menarik
+
                             $record->status === 'pending' &&
                             $record->current_step === 'bem';
                     })
