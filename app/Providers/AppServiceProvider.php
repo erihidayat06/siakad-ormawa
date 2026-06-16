@@ -22,7 +22,7 @@ class AppServiceProvider extends ServiceProvider
         //
     }
 
-    // protected $policies = [
-    //     \App\Models\Proposal::class => \App\Policies\ProposalPolicy::class,
-    // ];
+    protected $policies = [
+        \App\Models\Proposal::class => \App\Policies\ProposalPolicy::class,
+    ];
 }
