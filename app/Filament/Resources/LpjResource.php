@@ -166,17 +166,22 @@ class LpjResource extends Resource
                             ->required(fn() => in_array(auth()->user()->role, ['kaprodi'])),
                     ])
                     ->action(function ($record, array $data) {
+                        // 1. Tentukan langkah berikutnya secara berurutan
                         $nextStep = match ($record->current_step) {
                             'kaprodi' => 'wd3',
                             'wd3'     => 'wd2',
-                            'wd2'     => 'selesai',
+                            'wd2'     => 'selesai', // Tetap selesai, karena wd2 adalah pemberhentian terakhir
                             default   => 'selesai',
                         };
+
+                        // 2. Perbaikan Logika Status:
+                        // Status 'completed' HANYA jika $nextStep sudah mencapai 'selesai'
+                        $newStatus = ($nextStep === 'selesai') ? 'completed' : 'pending';
 
                         $record->update([
                             'current_step' => $nextStep,
                             'current_file' => $data['signed_file'] ?? $record->current_file,
-                            'status'       => ($nextStep === 'wd2' || $nextStep === 'selesai') ? 'completed' : 'pending',
+                            'status'       => $newStatus,
                         ]);
 
                         $record->Lpjlogs()->create([
